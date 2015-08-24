@@ -4,56 +4,73 @@
 (defmulti write-diff (fn [& args] (first args)))
 (defmulti apply-diff (fn [& args] (first args)))
 
-(defmethod write-diff 'int32 [type stream from to]
+(defmethod write-diff 'Integer [type stream from to]
   (. stream writeInt to))
 
-(defmethod apply-diff 'int32 [type stream old]
+(defmethod apply-diff 'Integer [type stream old]
   (. stream readInt))
 
-(defmethod write-diff 'int16 [type stream from to]
+(defmethod write-diff 'Short [type stream from to]
   (. stream writeShort to))
 
-(defmethod apply-diff 'int16 [type stream old]
+(defmethod apply-diff 'Short [type stream old]
   (. stream readShort))
 
-(defmethod write-diff 'int8 [type stream from to]
+(defmethod write-diff 'Byte [type stream from to]
   (. stream writeByte to))
 
-(defmethod apply-diff 'int8 [type stream old]
+(defmethod apply-diff 'Byte [type stream old]
   (. stream readByte))
 
 (defn pow2 [] (iterate #(* 2 %) 1))
 
-(defn gen-write-diff [name field-names field-types]
-  `(defmethod write-diff '~name [~'type ~'stream ~'from ~'to]
-     (let [~'flags (unchecked-byte
-                    (bit-or
-                     ~@(map
-                        (fn [field flag]
-                          `(if (= (. ~'from ~field) (. ~'to ~field)) 0 ~flag))
-                        field-names
-                        (pow2))))]
-       (. ~'stream ~'writeByte ~'flags)
-       ~@(map
-          (fn [field type index]
-            `(when (bit-test ~'flags ~index) (write-diff '~type ~'stream (. ~'from ~field) (. ~'to ~field))))
-          field-names
-          field-types
-          (range)))))
+(defn type-eq [type]
+  (case type
+    (Byte Short Integer) '==
+    (if (class? (resolve type))
+      'identical?
+      '=)))
 
+(defn tagged-sym [sym tag]
+  (with-meta sym {:tag tag}))
+
+(defn gen-write-diff [name field-names field-types]
+  (let [stream-sym (tagged-sym 'stream `DataOutputStream)
+        from-sym (tagged-sym 'from name)
+        to-sym (tagged-sym 'to name)]
+    `(defmethod write-diff '~name [~'type ~stream-sym ~from-sym ~to-sym]
+       (let [~'flags (unchecked-byte
+                      (bit-or
+                       ~@(map
+                          (fn [field type flag]
+                            `(if (~(type-eq type) (. ~from-sym ~field) (. ~to-sym ~field)) 0 ~flag))
+                          field-names
+                          field-types
+                          (pow2))))]
+         (. ~stream-sym ~'writeByte ~'flags)
+         ~@(map
+            (fn [field type index]
+              `(when (bit-test ~'flags ~index)
+                 (write-diff '~type ~stream-sym (. ~from-sym ~field) (. ~to-sym ~field))))
+            field-names
+            field-types
+            (range))))))
+  
 (defn gen-apply-diff [name field-names field-types]
-  `(defmethod apply-diff '~name [~'type ~'stream ~'old]
-     (let [~'flags (. ~'stream ~'readByte)]
-       (new
-        ~name
-        ~@(map
-           (fn [field type index]
-             `(if (bit-test ~'flags ~index)
-                (apply-diff '~type ~'stream (. ~'old ~field))
-                (. ~'old ~field)))
-           field-names
-           field-types
-           (range))))))
+  (let [stream-sym (tagged-sym 'stream `DataInputStream)
+        old-sym (tagged-sym 'old name)]
+    `(defmethod apply-diff '~name [~'type ~stream-sym ~old-sym]
+       (let [~'flags (. ~stream-sym ~'readByte)]
+         (new
+          ~name
+          ~@(map
+             (fn [field type index]
+               `(if (bit-test ~'flags ~index)
+                  (apply-diff '~type ~stream-sym (. ~old-sym ~field))
+                  (. ~old-sym ~field)))
+             field-names
+             field-types
+             (range)))))))
 
 (defmacro def-net-struct [name & fields]
   `(do
@@ -62,33 +79,47 @@
      ~(gen-apply-diff name (map first fields) (map second fields))))
 
 (macroexpand-1 '(def-net-struct Baz
-                  (a int32)
-                  (b int16)
-                  (c int16)
-                  (d int32)))
+                  (a Integer)
+                  (b Short)
+                  (c Short)
+                  (d Integer)))
+
+(macroexpand-1 '(def-net-struct Bar
+                  (x Short)
+                  (y Short)
+                  (baz Baz)))
 
 (def-net-struct Baz
-  (a int32)
-  (b int16)
-  (c int16)
-  (d int32))
+  (a Integer)
+  (b Short)
+  (c Short)
+  (d Integer))
 
 (def-net-struct Bar
-  (x int16)
-  (y int16)
+  (x Short)
+  (y Short)
   (baz Baz))
 
 (let [bos (new ByteArrayOutputStream)
-      dos (new DataOutputStream bos)]
-  (write-diff 'Bar dos (Bar. 1 1 (Baz. 1 2 3 4)) (Bar. 1 1 (Baz. 1 2 3 4)))
+      dos (new DataOutputStream bos)
+      baz (Baz. 1 2 3 4)]
+  (write-diff 'Bar dos (Bar. 1 1 baz) (Bar. 2 2 (assoc baz :a 10) ))
   (let [arr (. bos toByteArray)
         bis (new ByteArrayInputStream arr)
         dis (new DataInputStream bis)]
     (print (count arr))
-    (apply-diff 'Bar dis (Bar. 1 1 (Baz. 1 2 3 4)))))
+    (apply-diff 'Bar dis (Bar. 1 1 baz))))
 
-(defn bazbaz [a b]
-  (+ a b))
+;(deftype Foobar [^byte x])
 
-(defn sum-squares [a b]
-  (+ (* a a) (* b b)))
+;(+ (.x (Foobar. 1)) (.x (Foobar. 2)))
+
+;(defn test1 [(with-meta obj {:tag String})]
+;  (.substring x 0))
+
+(defmacro gen-with-hints []
+  (let [tagged-x (tagged-sym 'x `String)]
+    `(defn test1 [~tagged-x]
+       (.substring ~tagged-x 0))))
+
+(gen-with-hints)
