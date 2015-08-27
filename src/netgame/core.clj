@@ -214,20 +214,6 @@
        ~(gen-write-bin struct-name (map :name canon-nf) (map :type canon-nf) (map :type-opts canon-nf))
        ~(gen-read-bin struct-name client-rec-name (map :name canon-nf) (map :type canon-nf) (map :type-opts canon-nf)))))
 
-;;
-;; Tests
-;;
-
-'(def-net-struct Foo
-   :net [(a int)
-         (b short)
-         (c short)
-         (d int :interp linear)
-         (e (short-map :val-type Baz) :interp linear)]
-   :server [(x)
-            (y)
-            (z int)])
-
 (macroexpand-1 '(def-net-struct Baz
                   :net [(a int)
                         (b short)
@@ -249,62 +235,18 @@
   :server
   [x y z])
 
-(def-net-struct Bar
-  :net
-  [(x short)
-   (y short)
-   (baz (Baz :a 1 :b 2))])
+;(macroexpand-1 '(-> 0 (bit-or 1) (bit-or 2) (bit-or 4) (bit-or 8) (bit-or 16)))
 
 ;; TODO:
 ;; full updates - done
 ;; add type options param - done
 ;; int map diffs - done
+;; handle case where record identities are different but atom leaves are identical - done, write 0 and let compression handle it
 
+;; handle record field change to nil (Maybe? types)
+;; handle short map element change to nil (Maybe? types)
+;; handle records with > 8 fields
 ;; interpolation
 ;; def-net-msg
 ;; syntax validation + option validation + ensure net struct has at least 1 net property
-;; flag 0 -> field changed to nil
 ;; write some unit tests
-
-(let [bos (new ByteArrayOutputStream)
-      dos (new DataOutputStream bos)
-      baz (Baz. 1 2 3 4 'a 'b 'c)]
-  (write-diff 'Bar dos (Bar. 1 1 baz) (Bar. 2 2 (assoc baz :a 10)) nil)
-  (let [arr (. bos toByteArray)
-        bis (new ByteArrayInputStream arr)
-        dis (new DataInputStream bis)]
-    (print (count arr))
-    (apply-diff 'Bar dis (BarClient. 1 1 (BazClient. 1 2 3 4)) nil)))
-
-(let [bos (new ByteArrayOutputStream)
-      dos (new DataOutputStream bos)
-      baz (Baz. 1 2 3 4 'a 'b 'c)]
-  (write-bin 'Bar dos (Bar. 1 1 baz) nil)
-  (let [arr (. bos toByteArray)
-        bis (new ByteArrayInputStream arr)
-        dis (new DataInputStream bis)]
-    (read-bin 'Bar dis nil)))
-
-
-
-(def-net-struct Foo :net [(x int)])
-
-(let [bos (new ByteArrayOutputStream)
-      dos (new DataOutputStream bos)
-      from {1 (Foo. 1), 2 (Foo. 2), 3 (Foo. 3), 4 (Foo. 4)}
-      from-client {1 (FooClient. 1), 2 (FooClient. 2), 3 (FooClient. 3), 4 (FooClient. 4)}
-      to (-> from (dissoc 2) (assoc 5 (Foo. 5)) (assoc 1 (Foo. 777)))]
-  (write-diff 'short-map dos from to {:elem-type 'Foo})
-  (let [arr (. bos toByteArray)
-        bis (new ByteArrayInputStream arr)
-        dis (new DataInputStream bis)]
-    (apply-diff 'short-map dis from-client {:elem-type 'Foo})))
-
-(let [bos (new ByteArrayOutputStream)
-      dos (new DataOutputStream bos)
-      m {1 (Foo. 1), 2 (Foo. 2), 3 (Foo. 3), 4 (Foo. 4)}]
-  (write-bin 'short-map dos m {:elem-type 'Foo})
-  (let [arr (. bos toByteArray)
-        bis (new ByteArrayInputStream arr)
-        dis (new DataInputStream bis)]
-    (read-bin 'short-map dis {:elem-type 'Foo})))
