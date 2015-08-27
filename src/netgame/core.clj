@@ -49,6 +49,62 @@
 (defmethod apply-diff 'byte [type ^DataInputStream stream old _]
   (. stream readByte))
 
+;; short-map
+
+(defmethod write-bin 'short-map [type ^DataOutputStream stream x type-opts]
+  (. stream writeShort (count x))
+  (let [elem-type (:elem-type type-opts)
+        elem-type-opts (:elem-type-opts type-opts)
+        val-write-bin (get-method write-bin elem-type)]
+    (doseq [[k v] x]
+      (. stream writeShort k)
+      (val-write-bin elem-type stream v elem-type-opts))))
+
+(defmethod read-bin 'short-map [type ^DataInputStream stream type-opts]
+  (let [out (transient {})
+        elem-type (:elem-type type-opts)
+        elem-type-opts (:elem-type-opts type-opts)
+        val-read-bin (get-method read-bin elem-type)]
+    (dotimes [_ (. stream readShort)]
+      (assoc! out (. stream readShort) (val-read-bin elem-type stream elem-type-opts)))
+    (persistent! out)))
+
+(defmethod write-diff 'short-map [type ^DataOutputStream stream from to type-opts]
+  (let [[removed added shared] (diff (set (keys from)) (set (keys to)))
+        changed (filter #((complement identical?) (get from %) (get to %)) shared)
+        elem-type (:elem-type type-opts)
+        elem-type-opts (:elem-type-opts type-opts)
+        val-write-diff (get-method write-diff elem-type)
+        val-write-bin (get-method write-bin elem-type)]
+    (. stream writeShort (count removed))
+    (doseq [key removed]
+      (. stream writeShort key))
+    (. stream writeShort (count added))
+    (doseq [key added]
+      (. stream writeShort key)
+      (val-write-bin elem-type stream (get to key) elem-type-opts))
+    (. stream writeShort (count changed))
+    (doseq [key changed]
+      (. stream writeShort key)
+      (val-write-diff elem-type stream (get from key) (get to key) elem-type-opts))))
+
+(defmethod apply-diff 'short-map [type ^DataInputStream stream old type-opts]
+  (let [tmp (transient old)
+        elem-type (:elem-type type-opts)
+        elem-type-opts (:elem-type-opts type-opts)
+        val-apply-diff (get-method apply-diff elem-type)
+        val-read-bin (get-method read-bin elem-type)]
+    (dotimes [_ (. stream readShort)]
+      (dissoc! tmp (. stream readShort)))
+    (dotimes [_ (. stream readShort)]
+      (assoc! tmp (. stream readShort) (val-read-bin elem-type stream elem-type-opts)))
+    (dotimes [_ (. stream readShort)]
+      (let [key (. stream readShort)]
+        (assoc! tmp key (val-apply-diff elem-type stream (get old key) elem-type-opts))))
+    (persistent! tmp)))
+
+;; Etc.
+
 (defn pow2 [] (iterate #(* 2 %) 1))
 
 (defn type-eq [type]
@@ -90,7 +146,7 @@
         to-sym (tagged-sym 'to name)]
     `(defmethod write-diff '~name [~'type ~stream-sym ~from-sym ~to-sym ~'_]
        (let [~'flags (unchecked-byte
-                      (bit-or
+                      (bit-or 0
                        ~@(map
                           (fn [field type flag]
                             `(if (~(type-eq type) (. ~from-sym ~field) (. ~to-sym ~field)) 0 ~flag))
@@ -202,9 +258,9 @@
 ;; TODO:
 ;; full updates - done
 ;; add type options param - done
+;; int map diffs - done
 
 ;; interpolation
-;; int map diffs
 ;; def-net-msg
 ;; syntax validation + option validation + ensure net struct has at least 1 net property
 ;; flag 0 -> field changed to nil
@@ -228,3 +284,27 @@
         bis (new ByteArrayInputStream arr)
         dis (new DataInputStream bis)]
     (read-bin 'Bar dis nil)))
+
+
+
+(def-net-struct Foo :net [(x int)])
+
+(let [bos (new ByteArrayOutputStream)
+      dos (new DataOutputStream bos)
+      from {1 (Foo. 1), 2 (Foo. 2), 3 (Foo. 3), 4 (Foo. 4)}
+      from-client {1 (FooClient. 1), 2 (FooClient. 2), 3 (FooClient. 3), 4 (FooClient. 4)}
+      to (-> from (dissoc 2) (assoc 5 (Foo. 5)) (assoc 1 (Foo. 777)))]
+  (write-diff 'short-map dos from to {:elem-type 'Foo})
+  (let [arr (. bos toByteArray)
+        bis (new ByteArrayInputStream arr)
+        dis (new DataInputStream bis)]
+    (apply-diff 'short-map dis from-client {:elem-type 'Foo})))
+
+(let [bos (new ByteArrayOutputStream)
+      dos (new DataOutputStream bos)
+      m {1 (Foo. 1), 2 (Foo. 2), 3 (Foo. 3), 4 (Foo. 4)}]
+  (write-bin 'short-map dos m {:elem-type 'Foo})
+  (let [arr (. bos toByteArray)
+        bis (new ByteArrayInputStream arr)
+        dis (new DataInputStream bis)]
+    (read-bin 'short-map dis {:elem-type 'Foo})))
