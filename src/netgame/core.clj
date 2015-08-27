@@ -7,47 +7,69 @@
 (defmulti write-diff (fn [type stream from to type-opts] type))
 (defmulti apply-diff (fn [type stream fold type-opts] type))
 
-;; Int
+(defn tagged-sym [sym tag]
+  (with-meta sym {:tag tag}))
 
-(defmethod write-bin 'int [type ^DataOutputStream stream x _]
-  (. stream writeInt x))
+(defmacro gen-primitive-methods [type write-method read-method]
+  (let [ostream-sym (tagged-sym 'stream 'DataOutputStream)
+        istream-sym (tagged-sym 'stream 'DataInputStream)]
+    `(do
+       (defmethod write-bin '~type [~'type ~ostream-sym ~'x ~'_]
+         (. ~ostream-sym ~write-method ~'x))
+       (defmethod read-bin '~type [~'type ~istream-sym ~'_]
+         (. ~istream-sym ~read-method))
+       (defmethod write-diff '~type [~'type ~ostream-sym ~'from ~'to ~'_]
+         (. ~ostream-sym ~write-method ~'to))
+       (defmethod apply-diff '~type [~'type ~istream-sym ~'old ~'_]
+         (. ~istream-sym ~read-method)))))
 
-(defmethod read-bin 'int [type ^DataInputStream stream _]
-  (. stream readInt))
+(gen-primitive-methods int writeInt readInt)
+(gen-primitive-methods short writeShort readShort)
+(gen-primitive-methods byte writeByte readByte)
+(gen-primitive-methods float writeFloat readFloat)
+(gen-primitive-methods string writeUTF readUTF)
 
-(defmethod write-diff 'int [type ^DataOutputStream stream from to _]
-  (. stream writeInt to))
+;; ;; Int
 
-(defmethod apply-diff 'int [type ^DataInputStream stream old _]
-  (. stream readInt))
+;; (defmethod write-bin 'int [type ^DataOutputStream stream x _]
+;;   (. stream writeInt x))
 
-;; Short
+;; (defmethod read-bin 'int [type ^DataInputStream stream _]
+;;   (. stream readInt))
 
-(defmethod write-bin 'short [type ^DataOutputStream stream x _]
-  (. stream writeShort x))
+;; (defmethod write-diff 'int [type ^DataOutputStream stream from to _]
+;;   (. stream writeInt to))
 
-(defmethod read-bin 'short [type ^DataInputStream stream _]
-  (. stream readShort))
+;; (defmethod apply-diff 'int [type ^DataInputStream stream old _]
+;;   (. stream readInt))
 
-(defmethod write-diff 'short [type ^DataOutputStream stream from to _]
-  (. stream writeShort to))
+;; ;; Short
 
-(defmethod apply-diff 'short [type ^DataInputStream stream old _]
-  (. stream readShort))
+;; (defmethod write-bin 'short [type ^DataOutputStream stream x _]
+;;   (. stream writeShort x))
 
-;; Byte
+;; (defmethod read-bin 'short [type ^DataInputStream stream _]
+;;   (. stream readShort))
 
-(defmethod write-bin 'byte [type ^DataOutputStream stream x _]
-  (. stream writeByte x))
+;; (defmethod write-diff 'short [type ^DataOutputStream stream from to _]
+;;   (. stream writeShort to))
 
-(defmethod read-bin 'byte [type ^DataInputStream stream _]
-  (. stream readByte))
+;; (defmethod apply-diff 'short [type ^DataInputStream stream old _]
+;;   (. stream readShort))
 
-(defmethod write-diff 'byte [type ^DataOutputStream stream from to _]
-  (. stream writeByte to))
+;; ;; Byte
 
-(defmethod apply-diff 'byte [type ^DataInputStream stream old _]
-  (. stream readByte))
+;; (defmethod write-bin 'byte [type ^DataOutputStream stream x _]
+;;   (. stream writeByte x))
+
+;; (defmethod read-bin 'byte [type ^DataInputStream stream _]
+;;   (. stream readByte))
+
+;; (defmethod write-diff 'byte [type ^DataOutputStream stream from to _]
+;;   (. stream writeByte to))
+
+;; (defmethod apply-diff 'byte [type ^DataInputStream stream old _]
+;;   (. stream readByte))
 
 ;; short-map
 
@@ -114,8 +136,17 @@
       'identical?
       '=)))
 
-(defn tagged-sym [sym tag]
-  (with-meta sym {:tag tag}))
+(defn get-write-method [^long bits]
+  (cond (<= bits 8) 'writeByte
+        (<= bits 16) 'writeShort
+        (<= bits 32) 'writeInt
+        true 'writeLong))
+
+(defn get-read-method [^long bits]
+  (cond (<= bits 8) 'readByte
+        (<= bits 16) 'readShort
+        (<= bits 32) 'readInt
+        true 'readLong))
 
 (defn gen-write-bin [name field-names field-types field-type-opts]
   (let [stream-sym (tagged-sym 'stream `DataOutputStream)
@@ -153,7 +184,7 @@
                           field-names
                           field-types
                           (pow2))))]
-         (. ~stream-sym ~'writeByte ~'flags)
+         (. ~stream-sym ~(get-write-method (count field-names)) ~'flags)
          ~@(map
             (fn [field type type-opts index]
               `(when (bit-test ~'flags ~index)
@@ -167,7 +198,7 @@
   (let [stream-sym (tagged-sym 'stream `DataInputStream)
         old-sym (tagged-sym 'old client-rec-name)]
     `(defmethod apply-diff '~name [~'type ~stream-sym ~old-sym ~'_]
-       (let [~'flags (. ~stream-sym ~'readByte)]
+       (let [~'flags (. ~stream-sym ~(get-read-method (count field-names)))]
          (new
           ~client-rec-name
           ~@(map
@@ -242,11 +273,14 @@
 ;; add type options param - done
 ;; int map diffs - done
 ;; handle case where record identities are different but atom leaves are identical - done, write 0 and let compression handle it
+;; write some unit tests - done
+;; handle records with > 8 fields - done
+;; handle floats - done
+;; handle strings - done
+
 
 ;; handle record field change to nil (Maybe? types)
 ;; handle short map element change to nil (Maybe? types)
-;; handle records with > 8 fields
 ;; interpolation
 ;; def-net-msg
 ;; syntax validation + option validation + ensure net struct has at least 1 net property
-;; write some unit tests
