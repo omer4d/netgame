@@ -9,6 +9,18 @@
            ~@(mapcat (fn [field] `(~field (. ~tmp-sym ~field))) fields)]
        ~@body)))
 
+(defmacro updated-instance [cls-sym old fields & vals]
+  (let [^Class cls (resolve cls-sym)
+        basis (clojure.lang.Reflector/invokeStaticMethod cls "getBasis" (to-array []))
+        tmp-sym (gensym)
+        fvs (zipmap fields vals)]
+    `(let [~tmp-sym ~old]
+       (new ~cls
+            ~@(map #(if (contains? fvs %)
+                      (get fvs %)
+                      `(. ~tmp-sym ~%))
+                   basis)))))
+
 (def-net-struct Entity
   :net
   [(x float)
@@ -43,11 +55,13 @@
 (defn create-game [n]
   (Game. (zipmap (range)
                  (take n (repeatedly #(create-entity (randf 0 640) (randf 0 480)))))))
-
-
-
+  
 (defn update-entity [^Entity ent ^double dt]
-  ent)
+  (with-fields ent [x y vx vy]
+    (updated-instance Entity ent [x y vy]
+                     (+ x (* vx dt))
+                     (+ y (* vy dt))
+                     (+ vy (* 10 dt)))))
 
 (defn setup []
   (q/smooth)
