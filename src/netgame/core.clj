@@ -10,6 +10,11 @@
 (defn tagged-sym [sym tag]
   (with-meta sym {:tag tag}))
 
+(defn safe-tagged-sym [sym tag]
+  (if (or (contains? '#{int short byte float string} tag) (class? (resolve tag)))
+    (with-meta sym {:tag tag})
+    sym))
+
 (defmacro gen-primitive-methods [type write-method read-method]
   (let [ostream-sym (tagged-sym 'stream 'DataOutputStream)
         istream-sym (tagged-sym 'stream 'DataInputStream)]
@@ -28,48 +33,6 @@
 (gen-primitive-methods byte writeByte readByte)
 (gen-primitive-methods float writeFloat readFloat)
 (gen-primitive-methods string writeUTF readUTF)
-
-;; ;; Int
-
-;; (defmethod write-bin 'int [type ^DataOutputStream stream x _]
-;;   (. stream writeInt x))
-
-;; (defmethod read-bin 'int [type ^DataInputStream stream _]
-;;   (. stream readInt))
-
-;; (defmethod write-diff 'int [type ^DataOutputStream stream from to _]
-;;   (. stream writeInt to))
-
-;; (defmethod apply-diff 'int [type ^DataInputStream stream old _]
-;;   (. stream readInt))
-
-;; ;; Short
-
-;; (defmethod write-bin 'short [type ^DataOutputStream stream x _]
-;;   (. stream writeShort x))
-
-;; (defmethod read-bin 'short [type ^DataInputStream stream _]
-;;   (. stream readShort))
-
-;; (defmethod write-diff 'short [type ^DataOutputStream stream from to _]
-;;   (. stream writeShort to))
-
-;; (defmethod apply-diff 'short [type ^DataInputStream stream old _]
-;;   (. stream readShort))
-
-;; ;; Byte
-
-;; (defmethod write-bin 'byte [type ^DataOutputStream stream x _]
-;;   (. stream writeByte x))
-
-;; (defmethod read-bin 'byte [type ^DataInputStream stream _]
-;;   (. stream readByte))
-
-;; (defmethod write-diff 'byte [type ^DataOutputStream stream from to _]
-;;   (. stream writeByte to))
-
-;; (defmethod apply-diff 'byte [type ^DataInputStream stream old _]
-;;   (. stream readByte))
 
 ;; short-map
 
@@ -106,7 +69,7 @@
       (. stream writeShort key)
       (val-write-bin elem-type stream (get to key) elem-type-opts))
     (. stream writeShort (count changed))
-    (doseq [key changed]
+     (doseq [key changed]
       (. stream writeShort key)
       (val-write-diff elem-type stream (get from key) (get to key) elem-type-opts))))
 
@@ -238,12 +201,23 @@
         canon-sf (map canonize-sf (:server field-groups))
         client-rec-name (symbol (str (name struct-name) "Client"))]
     `(do
-       (defrecord ~struct-name ~(apply vector (map #(tagged-sym (:name %) (:type %)) (concat canon-nf canon-sf))))
-       (defrecord ~client-rec-name ~(apply vector (map #(tagged-sym (:name %) (:type %)) canon-nf)))
+       (defrecord ~struct-name ~(apply vector (map #(safe-tagged-sym (:name %) (:type %)) (concat canon-nf canon-sf))))
+       (defrecord ~client-rec-name ~(apply vector (map #(safe-tagged-sym (:name %) (:type %)) canon-nf)))
        ~(gen-write-diff struct-name (map :name canon-nf) (map :type canon-nf) (map :type-opts canon-nf))
        ~(gen-apply-diff struct-name client-rec-name (map :name canon-nf) (map :type canon-nf) (map :type-opts canon-nf))
        ~(gen-write-bin struct-name (map :name canon-nf) (map :type canon-nf) (map :type-opts canon-nf))
        ~(gen-read-bin struct-name client-rec-name (map :name canon-nf) (map :type canon-nf) (map :type-opts canon-nf)))))
+
+(defmacro defbin [rec-name & fields]
+  (let [canon-fields (map canonize-sf fields)]
+    `(do
+       (defrecord ~rec-name ~(apply vector (map #(tagged-sym (:name %) (:type %)) canon-fields)))
+       ~(gen-write-bin rec-name (map :name canon-fields) (map :type canon-fields) (map :type-opts canon-fields))
+       ~(gen-read-bin rec-name rec-name (map :name canon-fields) (map :type canon-fields) (map :type-opts canon-fields)))))
+
+(macroexpand-1 '(defbin MsgHeader
+                  (type byte)
+                  (ver byte)))
 
 (macroexpand-1 '(def-net-struct Baz
                   :net [(a int)
@@ -257,14 +231,7 @@
                         (y short)
                         (baz (Baz :a 1 :b 2))]))
 
-(def-net-struct Baz
-  :net
-  [(a int)
-   (b short)
-   (c short)
-   (d int)]
-  :server
-  [x y z])
+;'(def-net-msg 
 
 ;(macroexpand-1 '(-> 0 (bit-or 1) (bit-or 2) (bit-or 4) (bit-or 8) (bit-or 16)))
 
@@ -277,10 +244,10 @@
 ;; handle records with > 8 fields - done
 ;; handle floats - done
 ;; handle strings - done
-
+;; def-net-msg - done, use two defbins
 
 ;; handle record field change to nil (Maybe? types)
 ;; handle short map element change to nil (Maybe? types)
 ;; interpolation
-;; def-net-msg
 ;; syntax validation + option validation + ensure net struct has at least 1 net property
+;; figure out replacement for safe-tagged-sym
