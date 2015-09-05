@@ -99,7 +99,7 @@
   (assoc game :ents (fmap #(update-entity % dt) (:ents game))))
 
 (defn draw-ent [{:keys [x y rad] :as ent}]
-  (q/ellipse x y 1 1))
+  (q/ellipse x y (* rad 2) (* rad 2)))
 
 (defn draw-game [game]
   (doseq [[_ ent] (:ents game)]
@@ -108,6 +108,8 @@
 ;; *************
 ;; * Processes *
 ;; *************
+
+(defrecord ServerState [clients game])
 
 (def game-state (atom (create-game 10)))
 
@@ -125,25 +127,23 @@
                       (when-not (Thread/interrupted)
                         (if (>= (nano->sec (- curr-time last-tick-time)) target-dt)
                           (do
-                            (println "tick!")
                             (swap! game-state update-game target-dt)
                             (recur curr-time))
                           (recur last-tick-time))))))))
 
 (defn setup []
   (q/smooth)
-  (q/frame-rate 60)
-  (q/background 200))
+  (q/frame-rate 60))
 
 (defn draw []
+  (q/background 200)
   (draw-game @game-state))
 
-(q/defsketch example
-  :title "Oh so many grey circles"
-  :setup setup
-  :draw draw
-  :size [640 480])
+(defn start-client! []
+  (q/defsketch example
+    :title "Oh so many grey circles"
+    :setup setup
+    :draw draw
+    :size [640 480]))
 
-;(reset! game-state (create-game 10000))
-
-;(start-server! 0.01)
+;(start-server! 0.025)

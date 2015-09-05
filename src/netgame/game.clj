@@ -36,9 +36,7 @@
 (defn clamp [x min max]
   (if (< x min)
     min
-    (if (> x max)
-      max
-      x)))
+    (if (> x max) max x)))
 
 (defn nano->sec ^double [^long x] (/ (double x) 1000000000.0))
 
@@ -115,7 +113,7 @@
 
 (def server (atom nil))
 
-(defn stop-server! []
+(defn stop-server! [] 
   (future-cancel @server))
 
 (defn start-server! [target-dt]
