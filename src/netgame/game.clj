@@ -1,7 +1,7 @@
 (ns netgame.game
   (:require [netgame.core :refer [def-net-struct write-bin read-bin write-diff apply-diff]])
   (:require [quil.core :as q])
-  (:import [java.io DataInputStream DataOutputStream ByteArrayInputStream ByteArrayOutputStream]))
+  (:import [java.nio ByteBuffer]))
 
 (defmacro with-fields [rec fields & body]
   (let [tmp-sym (gensym)]

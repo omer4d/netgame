@@ -1,11 +1,11 @@
 (ns netgame.core
-  (:import [java.io DataInputStream DataOutputStream ByteArrayInputStream ByteArrayOutputStream])
+  (:import [java.nio ByteBuffer])
   (:use clojure.data))
 
-(defmulti write-bin (fn [type stream x type-opts] type))
-(defmulti read-bin (fn [type stream type-opts] type))
-(defmulti write-diff (fn [type stream from to type-opts] type))
-(defmulti apply-diff (fn [type stream fold type-opts] type))
+(defmulti write-bin (fn [type buff x type-opts] type))
+(defmulti read-bin (fn [type buff type-opts] type))
+(defmulti write-diff (fn [type buff from to type-opts] type))
+(defmulti apply-diff (fn [type buff old type-opts] type))
 
 (defn tagged-sym [sym tag]
   (with-meta sym {:tag tag}))
@@ -16,76 +16,78 @@
     sym))
 
 (defmacro gen-primitive-methods [type write-method read-method]
-  (let [ostream-sym (tagged-sym 'stream 'DataOutputStream)
-        istream-sym (tagged-sym 'stream 'DataInputStream)]
+  (let [buff-sym (tagged-sym 'buff 'ByteBuffer)]
     `(do
-       (defmethod write-bin '~type [~'type ~ostream-sym ~'x ~'_]
-         (. ~ostream-sym ~write-method ~'x))
-       (defmethod read-bin '~type [~'type ~istream-sym ~'_]
-         (. ~istream-sym ~read-method))
-       (defmethod write-diff '~type [~'type ~ostream-sym ~'from ~'to ~'_]
-         (. ~ostream-sym ~write-method ~'to))
-       (defmethod apply-diff '~type [~'type ~istream-sym ~'old ~'_]
-         (. ~istream-sym ~read-method)))))
+       (defmethod write-bin '~type [~'type ~buff-sym ~'x ~'_]
+         (. ~buff-sym ~write-method ~'x))
+       (defmethod read-bin '~type [~'type ~buff-sym ~'_]
+         (. ~buff-sym ~read-method))
+       (defmethod write-diff '~type [~'type ~buff-sym ~'from ~'to ~'_]
+         (. ~buff-sym ~write-method ~'to))
+       (defmethod apply-diff '~type [~'type ~buff-sym ~'old ~'_]
+         (. ~buff-sym ~read-method)))))
 
-(gen-primitive-methods int writeInt readInt)
-(gen-primitive-methods short writeShort readShort)
-(gen-primitive-methods byte writeByte readByte)
-(gen-primitive-methods float writeFloat readFloat)
-(gen-primitive-methods string writeUTF readUTF)
+(gen-primitive-methods int putInt getInt)
+(gen-primitive-methods short putShort getShort)
+(gen-primitive-methods float putFloat getFloat)
+
+(defmethod write-bin 'byte [type ^ByteBuffer buff x _] (. buff put (byte x)))
+(defmethod read-bin 'byte [type ^ByteBuffer buff _] (. buff get))
+(defmethod write-diff 'byte [type ^ByteBuffer buff from to _] (. buff put (byte to)))
+(defmethod apply-diff 'byte [type ^ByteBuffer buff old _] (. buff get))
 
 ;; short-map
 
-(defmethod write-bin 'short-map [type ^DataOutputStream stream x type-opts]
-  (. stream writeShort (count x))
+(defmethod write-bin 'short-map [type ^ByteBuffer buff x type-opts]
+  (. buff putShort (count x))
   (let [elem-type (:elem-type type-opts)
         elem-type-opts (:elem-type-opts type-opts)
         val-write-bin (get-method write-bin elem-type)]
     (doseq [[k v] x]
-      (. stream writeShort k)
-      (val-write-bin elem-type stream v elem-type-opts))))
+      (. buff putShort k)
+      (val-write-bin elem-type buff v elem-type-opts))))
 
-(defmethod read-bin 'short-map [type ^DataInputStream stream type-opts]
+(defmethod read-bin 'short-map [type ^ByteBuffer buff type-opts]
   (let [out (transient {})
         elem-type (:elem-type type-opts)
         elem-type-opts (:elem-type-opts type-opts)
         val-read-bin (get-method read-bin elem-type)]
-    (dotimes [_ (. stream readShort)]
-      (assoc! out (. stream readShort) (val-read-bin elem-type stream elem-type-opts)))
+    (dotimes [_ (. buff getShort)]
+      (assoc! out (. buff getShort) (val-read-bin elem-type buff elem-type-opts)))
     (persistent! out)))
 
-(defmethod write-diff 'short-map [type ^DataOutputStream stream from to type-opts]
+(defmethod write-diff 'short-map [type ^ByteBuffer buff from to type-opts]
   (let [[removed added shared] (diff (set (keys from)) (set (keys to)))
         changed (filter #((complement identical?) (get from %) (get to %)) shared)
         elem-type (:elem-type type-opts)
         elem-type-opts (:elem-type-opts type-opts)
         val-write-diff (get-method write-diff elem-type)
         val-write-bin (get-method write-bin elem-type)]
-    (. stream writeShort (count removed))
+    (. buff putShort (count removed))
     (doseq [key removed]
-      (. stream writeShort key))
-    (. stream writeShort (count added))
+      (. buff putShort key))
+    (. buff putShort (count added))
     (doseq [key added]
-      (. stream writeShort key)
-      (val-write-bin elem-type stream (get to key) elem-type-opts))
-    (. stream writeShort (count changed))
+      (. buff putShort key)
+      (val-write-bin elem-type buff (get to key) elem-type-opts))
+    (. buff putShort (count changed))
      (doseq [key changed]
-      (. stream writeShort key)
-      (val-write-diff elem-type stream (get from key) (get to key) elem-type-opts))))
+      (. buff putShort key)
+      (val-write-diff elem-type buff (get from key) (get to key) elem-type-opts))))
 
-(defmethod apply-diff 'short-map [type ^DataInputStream stream old type-opts]
+(defmethod apply-diff 'short-map [type ^ByteBuffer buff old type-opts]
   (let [tmp (transient old)
         elem-type (:elem-type type-opts)
         elem-type-opts (:elem-type-opts type-opts)
         val-apply-diff (get-method apply-diff elem-type)
         val-read-bin (get-method read-bin elem-type)]
-    (dotimes [_ (. stream readShort)]
-      (dissoc! tmp (. stream readShort)))
-    (dotimes [_ (. stream readShort)]
-      (assoc! tmp (. stream readShort) (val-read-bin elem-type stream elem-type-opts)))
-    (dotimes [_ (. stream readShort)]
-      (let [key (. stream readShort)]
-        (assoc! tmp key (val-apply-diff elem-type stream (get old key) elem-type-opts))))
+    (dotimes [_ (. buff getShort)]
+      (dissoc! tmp (. buff getShort)))
+    (dotimes [_ (. buff getShort)]
+      (assoc! tmp (. buff getShort) (val-read-bin elem-type buff elem-type-opts)))
+    (dotimes [_ (. buff getShort)]
+      (let [key (. buff getShort)]
+        (assoc! tmp key (val-apply-diff elem-type buff (get old key) elem-type-opts))))
     (persistent! tmp)))
 
 ;; Etc.
@@ -100,45 +102,45 @@
       '=)))
 
 (defn get-write-method [^long bits]
-  (cond (<= bits 8) 'writeByte
-        (<= bits 16) 'writeShort
-        (<= bits 32) 'writeInt
-        true 'writeLong))
+  (cond (<= bits 8) 'put
+        (<= bits 16) 'putShort
+        (<= bits 32) 'putInt
+        true 'putLong))
 
 (defn get-read-method [^long bits]
-  (cond (<= bits 8) 'readByte
-        (<= bits 16) 'readShort
-        (<= bits 32) 'readInt
-        true 'readLong))
+  (cond (<= bits 8) 'get
+        (<= bits 16) 'getShort
+        (<= bits 32) 'getInt
+        true 'getLong))
 
 (defn gen-write-bin [name field-names field-types field-type-opts]
-  (let [stream-sym (tagged-sym 'stream `DataOutputStream)
+  (let [buff-sym (tagged-sym 'buff `ByteBuffer)
         x-sym (tagged-sym 'x name)]
-    `(defmethod write-bin '~name [~'type ~stream-sym ~x-sym ~'_]
+    `(defmethod write-bin '~name [~'type ~buff-sym ~x-sym ~'_]
        ~@(map
           (fn [field type type-opts]
-            `(write-bin '~type ~stream-sym (. ~x-sym ~field) ~type-opts))
+            `(write-bin '~type ~buff-sym (. ~x-sym ~field) ~type-opts))
           field-names
           field-types
           field-type-opts))))
 
 (defn gen-read-bin [name client-rec-name field-names field-types field-type-opts]
-  (let [stream-sym (tagged-sym 'stream `DataInputStream)]
-    `(defmethod read-bin '~name [~'type ~stream-sym ~'_]
+  (let [buff-sym (tagged-sym 'buff `ByteBuffer)]
+    `(defmethod read-bin '~name [~'type ~buff-sym ~'_]
        (new
         ~client-rec-name
         ~@(map
            (fn [field type type-opts]
-             `(read-bin '~type ~stream-sym ~type-opts))
+             `(read-bin '~type ~buff-sym ~type-opts))
            field-names
            field-types
            field-type-opts)))))
 
 (defn gen-write-diff [name field-names field-types field-type-opts]
-  (let [stream-sym (tagged-sym 'stream `DataOutputStream)
+  (let [buff-sym (tagged-sym 'buff `ByteBuffer)
         from-sym (tagged-sym 'from name)
         to-sym (tagged-sym 'to name)]
-    `(defmethod write-diff '~name [~'type ~stream-sym ~from-sym ~to-sym ~'_]
+    `(defmethod write-diff '~name [~'type ~buff-sym ~from-sym ~to-sym ~'_]
        (let [~'flags (unchecked-byte
                       (bit-or 0
                        ~@(map
@@ -147,27 +149,27 @@
                           field-names
                           field-types
                           (pow2))))]
-         (. ~stream-sym ~(get-write-method (count field-names)) ~'flags)
+         (. ~buff-sym ~(get-write-method (count field-names)) ~'flags)
          ~@(map
             (fn [field type type-opts index]
               `(when (bit-test ~'flags ~index)
-                 (write-diff '~type ~stream-sym (. ~from-sym ~field) (. ~to-sym ~field) ~type-opts)))
+                 (write-diff '~type ~buff-sym (. ~from-sym ~field) (. ~to-sym ~field) ~type-opts)))
             field-names
             field-types
             field-type-opts
             (range))))))
 
 (defn gen-apply-diff [name client-rec-name field-names field-types field-type-opts]
-  (let [stream-sym (tagged-sym 'stream `DataInputStream)
+  (let [buff-sym (tagged-sym 'buff `ByteBuffer)
         old-sym (tagged-sym 'old client-rec-name)]
-    `(defmethod apply-diff '~name [~'type ~stream-sym ~old-sym ~'_]
-       (let [~'flags (. ~stream-sym ~(get-read-method (count field-names)))]
+    `(defmethod apply-diff '~name [~'type ~buff-sym ~old-sym ~'_]
+       (let [~'flags (. ~buff-sym ~(get-read-method (count field-names)))]
          (new
           ~client-rec-name
           ~@(map
              (fn [field type type-opts index]
                `(if (bit-test ~'flags ~index)
-                  (apply-diff '~type ~stream-sym (. ~old-sym ~field) ~type-opts)
+                  (apply-diff '~type ~buff-sym (. ~old-sym ~field) ~type-opts)
                   (. ~old-sym ~field)))
              field-names
              field-types
