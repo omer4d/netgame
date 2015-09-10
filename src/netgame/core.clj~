@@ -2,10 +2,13 @@
   (:import [java.nio ByteBuffer])
   (:use clojure.data))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 (defmulti write-bin (fn [type buff x type-opts] type))
 (defmulti read-bin (fn [type buff type-opts] type))
 (defmulti write-diff (fn [type buff from to type-opts] type))
-(defmulti apply-diff (fn [type buff fold type-opts] type))
+(defmulti apply-diff (fn [type buff old type-opts] type))
 
 (defn tagged-sym [sym tag]
   (with-meta sym {:tag tag}))
@@ -29,8 +32,12 @@
 
 (gen-primitive-methods int putInt getInt)
 (gen-primitive-methods short putShort getShort)
-(gen-primitive-methods byte put get)
 (gen-primitive-methods float putFloat getFloat)
+
+(defmethod write-bin 'byte [type ^ByteBuffer buff x _] (. buff put (byte x)))
+(defmethod read-bin 'byte [type ^ByteBuffer buff _] (. buff get))
+(defmethod write-diff 'byte [type ^ByteBuffer buff from to _] (. buff put (byte to)))
+(defmethod apply-diff 'byte [type ^ByteBuffer buff old _] (. buff get))
 
 ;; short-map
 
@@ -228,6 +235,7 @@
                   :net [(x short)
                         (y short)
                         (baz (Baz :a 1 :b 2))]))
+
 
 ;'(def-net-msg 
 

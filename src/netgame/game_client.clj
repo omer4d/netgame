@@ -1,0 +1,76 @@
+;; *******************
+;; * game_client.clj *
+;; *******************
+
+(in-ns 'netgame.game)
+
+(defrecord ClientState [channel buffer server-addr state game-state])
+
+(defn create-client-state [^InetAddress ip port]
+  (ClientState. (open-datagram-channel 0)
+                (ByteBuffer/allocate (* 1024 1024))
+                (new InetSocketAddress ip (int port))
+                :waiting
+                nil))
+
+(defn update-client-state [{:keys [state game-state] :as client-state} msgs dt]
+  (let [msg-groups (group-by :type msgs)
+        full-updates (:sv-full-update msg-groups)]
+    (assoc client-state
+           :state (if (empty? msgs) state :connected) 
+           :game-state (if (empty? full-updates)
+                         game-state
+                         (:content (last full-updates))))))
+
+(defn client-tick [{:keys [buffer channel server-addr] :as old-state} dt]
+  (let [msgs (read-msgs channel buffer parse-server-msg-body)
+        {:keys [game-state] :as new-state} (update-client-state old-state msgs dt)]
+    ;(when-not (nil? msgs)
+      ;(print msgs))
+    ;(.clear buffer)
+    ;(write-bin 'MsgHeader buffer (MsgHeader. (msg-kw->code :sv-full-update)) nil)
+    ;(write-bin 'Game buffer game-state nil)
+    ;(doseq [client clients]
+      ;(.send channel buffer client))
+    new-state))
+
+(defn setup [client-state]
+  (q/smooth)
+  (q/frame-rate 60)
+  (let [{:keys [channel buffer server-addr] :as cs} (create-client-state (InetAddress/getLocalHost) 9999)]
+    (reset! client-state cs)
+    (.clear buffer)
+    (write-msg-header buffer :cl-connecting)
+    (.flip buffer)
+    (.send channel buffer server-addr)))
+
+(defn on-client-close [client-state-atom]
+  (let [{:keys [channel buffer server-addr]} @client-state-atom]
+    (.clear buffer)
+    (write-msg-header buffer :cl-disconnecting)
+    (.flip buffer)
+    (.send channel buffer server-addr)
+    (close-datagram-channel channel)))
+
+(defn draw-ent [{:keys [x y rad] :as ent}]
+  (q/ellipse x y (* rad 2) (* rad 2)))
+
+(defn draw-game [game]
+  (doseq [[_ ent] (:ents game)]
+    (draw-ent ent)))
+
+(defn draw [client-state]
+  (q/background 200)
+  (swap! client-state client-tick (/ 1.0 60.0))
+  (let [game-state (:game-state @client-state)]
+    (when-not (nil? game-state)
+      (draw-game game-state))))
+
+(defn start-client! []
+  (let [client-state (atom nil)]
+    (q/defsketch example
+      :title "Oh so many grey circles"
+      :setup #(setup client-state)
+      :on-close #(on-client-close client-state)
+      :draw #(draw client-state)
+      :size [640 480])))

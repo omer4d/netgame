@@ -1,29 +1,25 @@
 (ns netgame.core-test
   (:require [clojure.test :refer :all]
             [netgame.core :refer [def-net-struct write-bin read-bin write-diff apply-diff]])
-  (:import [java.io DataInputStream DataOutputStream ByteArrayInputStream ByteArrayOutputStream]))
+  (:import [java.nio ByteBuffer]))
 
 (defn simple-diff [type from to type-opts]
-  (let [bos (new ByteArrayOutputStream)
-        dos (new DataOutputStream bos)]
-    (write-diff type dos from to type-opts)
-    (. bos toByteArray)))
+  (let [^ByteBuffer buff (ByteBuffer/allocate 2048)]
+    (write-diff type buff from to type-opts)
+    (.flip buff)
+    buff))
 
-(defn simple-apply-diff [type old diff type-opts]
-  (let [bis (new ByteArrayInputStream diff)
-        dis (new DataInputStream bis)]
-    (apply-diff type dis old type-opts)))
+(defn simple-apply-diff [type old buff type-opts]
+  (apply-diff type (.duplicate buff) old type-opts))
 
 (defn simple-write-bin [type x type-opts]
-  (let [bos (new ByteArrayOutputStream)
-        dos (new DataOutputStream bos)]
-    (write-bin type dos x type-opts)
-    (. bos toByteArray)))
+  (let [^ByteBuffer buff (ByteBuffer/allocate 2048)]
+    (write-bin type buff x type-opts)
+    (.flip buff)
+    buff))
 
-(defn simple-read-bin [type data type-opts]
-  (let [bis (new ByteArrayInputStream data)
-        dis (new DataInputStream bis)]
-    (read-bin type dis type-opts)))
+(defn simple-read-bin [type buff type-opts]
+  (read-bin type (.duplicate buff) type-opts))
 
 (defn bin-echo [type x type-opts]
   (simple-read-bin type (simple-write-bin type x type-opts) type-opts))
@@ -52,7 +48,7 @@
         cfrom2 (FlatClient. 0 0 0)
         diff (simple-diff 'Flat from to nil)]
     (testing "Flat struct diff"
-      (is (= (count diff) 7))
+      (is (= (.limit diff) 7))
       (is (= (simple-apply-diff 'Flat cfrom1 diff nil) (FlatClient. 5 2 5)))
       (is (= (simple-apply-diff 'Flat cfrom2 diff nil) (FlatClient. 5 0 5)))))
   
@@ -62,8 +58,8 @@
         diff2 (simple-diff 'Flat x y nil)
         cfrom (FlatClient. 0 0 0)]
     (testing "Flat struct diff edge cases"
-      (is (= (count diff1) 1))
-      (is (= (count diff2) 1))
+      (is (= (.limit diff1) 1))
+      (is (= (.limit diff2) 1))
       (is (= (simple-apply-diff 'Flat cfrom diff1 nil) cfrom))
       (is (= (simple-apply-diff 'Flat cfrom diff2 nil) cfrom))))
 
@@ -72,7 +68,7 @@
         cfrom (NestedClient. 1 2 (FlatClient. 1 2 3))
         diff (simple-diff 'Nested from to nil)]
     (testing "Nested struct diff"
-      (is (= (count diff) 12))
+      (is (= (.limit diff) 12))
       (is (= (simple-apply-diff 'Nested cfrom diff nil) (NestedClient. 1 3 (FlatClient. 5 2 5))))))
   
   (let [x (Nested. 1 2 (Flat. 1 2 3 :foo :foo 777))
@@ -81,8 +77,8 @@
         diff1 (simple-diff 'Nested x x nil)
         diff2 (simple-diff 'Nested x y nil)]
     (testing "Nested struct diff edge cases"
-      (is (= (count diff1) 1))
-      (is (= (count diff2) 2))
+      (is (= (.limit diff1) 1))
+      (is (= (.limit diff2) 2))
       (is (= (simple-apply-diff 'Nested cfrom diff1 nil) cfrom))
       (is (= (simple-apply-diff 'Nested cfrom diff2 nil) cfrom)))))
 
@@ -98,7 +94,7 @@
           from-client {1 (FooClient. 1), 2 (FooClient. 2), 3 (FooClient. 3), 4 (FooClient. 4)}
           to {}
           diff (simple-diff 'short-map from to {:elem-type 'Foo})]
-      (is (= (count diff) 14))
+      (is (= (.limit diff) 14))
       (is (= (simple-apply-diff 'short-map from-client diff {:elem-type 'Foo}) {}))))
   
   (testing "short-map diff (insertion)"
@@ -107,7 +103,7 @@
           from-client {1 (FooClient. 1)}
           to {1 foo1, 2 (Foo. 2), 3 (Foo. 3)}
           diff (simple-diff 'short-map from to {:elem-type 'Foo})]
-      (is (= (count diff) 18))
+      (is (= (.limit diff) 18))
       (is (= (simple-apply-diff 'short-map from-client diff {:elem-type 'Foo}) {1 (FooClient. 1), 2 (FooClient. 2), 3 (FooClient. 3)}))))
   
   (testing "short-map diff (insert+delete+update)"
@@ -115,7 +111,7 @@
           from-client {1 (FooClient. 1), 2 (FooClient. 2), 3 (FooClient. 3), 4 (FooClient. 4)}
           to (-> from (dissoc 2) (assoc 5 (Foo. 5)) (assoc 1 (Foo. 777)))
           diff (simple-diff 'short-map from to {:elem-type 'Foo})]
-      (is (= (count diff) 21))
+      (is (= (.limit diff) 21))
       (is (= (simple-apply-diff 'short-map from-client diff {:elem-type 'Foo}) {1 (FooClient. 777), 5 (FooClient. 5), 3 (FooClient. 3), 4 (FooClient. 4)})))))
 
 (deftest test-short-map-full-update

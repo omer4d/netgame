@@ -2,6 +2,9 @@
   (:import [java.nio ByteBuffer])
   (:use clojure.data))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 (defmulti write-bin (fn [type buff x type-opts] type))
 (defmulti read-bin (fn [type buff type-opts] type))
 (defmulti write-diff (fn [type buff from to type-opts] type))
@@ -217,25 +220,21 @@
        ~(gen-write-bin rec-name (map :name canon-fields) (map :type canon-fields) (map :type-opts canon-fields))
        ~(gen-read-bin rec-name rec-name (map :name canon-fields) (map :type canon-fields) (map :type-opts canon-fields)))))
 
-(macroexpand-1 '(defbin MsgHeader
-                  (type byte)
-                  (ver byte)))
+;; (macroexpand-1 '(defbin MsgHeader
+;;                   (type byte)
+;;                   (ver byte)))
 
-(macroexpand-1 '(def-net-struct Baz
-                  :net [(a int)
-                        (b short)
-                        (c short)
-                        (d int)]
-                  :server [(x int :p 1 :q 2) y z]))
+;; (macroexpand-1 '(def-net-struct Baz
+;;                   :net [(a int)
+;;                         (b short)
+;;                         (c short)
+;;                         (d int)]
+;;                   :server [(x int :p 1 :q 2) y z]))
 
-(macroexpand-1 '(def-net-struct Bar
-                  :net [(x short)
-                        (y short)
-                        (baz (Baz :a 1 :b 2))]))
-
-;'(def-net-msg 
-
-;(macroexpand-1 '(-> 0 (bit-or 1) (bit-or 2) (bit-or 4) (bit-or 8) (bit-or 16)))
+;; (macroexpand-1 '(def-net-struct Bar
+;;                   :net [(x short)
+;;                         (y short)
+;;                         (baz (Baz :a 1 :b 2))]))
 
 ;; TODO:
 ;; full updates - done
