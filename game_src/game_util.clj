@@ -2,7 +2,7 @@
 ;; * game_misc.clj *
 ;; *****************
 
-(in-ns 'netgame.game)
+(in-ns 'game)
 
 (defmacro with-fields [rec fields & body]
   (let [tmp-sym (gensym)]

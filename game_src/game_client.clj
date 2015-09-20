@@ -2,7 +2,7 @@
 ;; * game_client.clj *
 ;; *******************
 
-(in-ns 'netgame.game)
+(in-ns 'game)
 
 (defrecord ClientState [channel buffer server-addr state game-state])
 

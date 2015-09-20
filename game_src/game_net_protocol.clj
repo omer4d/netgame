@@ -2,7 +2,7 @@
 ;; * game_protocol.clj *
 ;; *********************
 
-(in-ns 'netgame.game)
+(in-ns 'game)
 
 (def msg-kws
   [:cl-connecting

@@ -1,8 +1,8 @@
-;; *******************
-;; * game_engine.clj *
-;; *******************
+;; *********************
+;; * game_gameplay.clj *
+;; *********************
 
-(in-ns 'netgame.game)
+(in-ns 'game)
 
 (def-net-struct Entity
   :net
@@ -23,9 +23,9 @@
 (defn create-entity [x y]
   (Entity. x y
            (randf 10 30)
-           (byte (rand-int 256))
-           (byte (rand-int 255))
-           (byte (rand-int 255))
+           (unchecked-byte (rand-int 256))
+           (unchecked-byte (rand-int 255))
+           (unchecked-byte (rand-int 255))
            (* (rand-sig) (randf 50 100))
            (* (rand-sig) (randf 50 100))))
 

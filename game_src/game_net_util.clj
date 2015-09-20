@@ -2,7 +2,7 @@
 ;; * game_net_utils.clj *
 ;; **********************
 
-(in-ns 'netgame.game)
+(in-ns 'game)
 
 (defn open-datagram-channel [port]
   (let [channel (DatagramChannel/open)]

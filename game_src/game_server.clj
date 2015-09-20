@@ -2,7 +2,7 @@
 ;; * game_server.clj *
 ;; *******************
 
-(in-ns 'netgame.game)
+(in-ns 'game)
 
 (defrecord ServerState [channel buffer  clients game-state])
 
@@ -22,8 +22,9 @@
 (defn server-tick [{:keys [buffer channel] :as old-state} dt]
   (let [msgs (read-msgs (:channel old-state) (:buffer old-state) parse-client-msg-body)
         {:keys [clients game-state] :as new-state} (update-server-state old-state msgs dt)]
-    ;(when-not (empty? msgs)
-      ;(println msgs))
+    (when-not (empty? msgs)
+      (println msgs)
+      (println clients))
     (.clear buffer)
     (write-full-update-msg buffer game-state)
     (.flip buffer)

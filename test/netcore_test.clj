@@ -1,6 +1,6 @@
-(ns netgame.core-test
+(ns netcore-test
   (:require [clojure.test :refer :all]
-            [netgame.core :refer [def-net-struct write-bin read-bin write-diff apply-diff]])
+            [netcore :refer [def-net-struct write-bin read-bin write-diff apply-diff]])
   (:import [java.nio ByteBuffer]))
 
 (defn simple-diff [type from to type-opts]
